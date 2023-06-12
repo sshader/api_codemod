@@ -216,7 +216,11 @@ const replaceFunctionReferences = (
         return false;
       }
 
-      return options.functionPrefixes.some((p) => value.startsWith(p));
+      return (
+        options.functionPrefixes.some(
+          (p) => value.startsWith(`${p}:`) && !value.startsWith("http://")
+        ) || options.functionPrefixes.includes(value)
+      );
     })
     .replaceWith((literal) => {
       const value = literal.node.value as string;

@@ -79,11 +79,22 @@ const shouldTransform = (filePath: string, functionsDir: string) => {
   }
 };
 
-const getReactFiles = (project: string, functionsDir: string) => {
-  const files = execSync("git grep -l '/_generated/react'", {
-    cwd: project,
-    encoding: "utf-8",
-  })
+const gitGrep = (project: string, functionsDir: string, regex: string) => {
+  let output = "";
+  try {
+    output = execSync("xargs git grep -lE", {
+      cwd: project,
+      encoding: "utf-8",
+      input: regex,
+    });
+  } catch (e: any) {
+    // This indicates there are no files
+    if (e.status === 1) {
+      return [];
+    }
+  }
+
+  const files = output
     .trim()
     .split("\n")
     .map((f) => path.join(project, f))
@@ -92,16 +103,12 @@ const getReactFiles = (project: string, functionsDir: string) => {
   return files;
 };
 
+const getReactFiles = (project: string, functionsDir: string) => {
+  return gitGrep(project, functionsDir, "'/_generated/react'");
+};
+
 const getConvexFiles = (project: string, functionsDir: string) => {
-  const files = execSync("git grep -l '/_generated/server'", {
-    cwd: project,
-    encoding: "utf-8",
-  })
-    .trim()
-    .split("\n")
-    .map((f) => path.join(project, f))
-    .filter((f) => shouldTransform(f, functionsDir));
-  return files;
+  return gitGrep(project, functionsDir, "'/_generated/server'");
 };
 
 // Best effort to find files with a string referencing a convex function
@@ -110,24 +117,24 @@ const getAllFiles = (
   functionsDir: string,
   functionPrefixes: string[]
 ) => {
-  const functionPrefixRegexParts: string[] = [];
-  // search for both `"listMessages` and `'listMessages`
-  functionPrefixes.forEach((p) => {
-    functionPrefixRegexParts.push(`"${p}`);
-    functionPrefixRegexParts.push(`'${p}`);
-  });
-  const regex = functionPrefixRegexParts.join("|");
-  console.log(regex);
-  const files = execSync(`xargs git grep -lE`, {
-    cwd: project,
-    input: "regex",
-    encoding: "utf-8",
-  })
-    .split("\n")
-    .map((f) => path.join(project, f))
-    .filter((f) => shouldTransform(f, functionsDir));
-  console.log(files);
-  return files;
+  // search for `"listMessages|"sendMessage`
+  const doubleQuoteRegex = functionPrefixes.map((f) => `"${f}`).join("|");
+
+  const doubleQuoteFiles = gitGrep(
+    project,
+    functionsDir,
+    `'${doubleQuoteRegex}'`
+  );
+
+  // search for `'listMessages|'sendMessage`
+  const singleQuoteRegex = functionPrefixes.map((f) => `"${f}`).join("|");
+
+  const singleQuoteFiles = gitGrep(
+    project,
+    functionsDir,
+    `'${singleQuoteRegex}'`
+  );
+  return [...new Set([...singleQuoteFiles, ...doubleQuoteFiles])];
 };
 
 const ensureConvexProject = async (project: string) => {
@@ -135,7 +142,8 @@ const ensureConvexProject = async (project: string) => {
   const packageJson = fs.readFileSync(packageJsonPath, { encoding: "utf-8" });
   const packageJsonContents = JSON.parse(packageJson);
   if (packageJsonContents["dependencies"]["convex"] === undefined) {
-    throw new Error("Convex not found in project dependencies");
+    console.error(`Not a Convex project: ${project}`);
+    process.exit(1);
   }
 };
 
@@ -149,43 +157,57 @@ const getFunctionPrefixes = async (functionsDir: string) => {
       functionPrefixes.push(path.join(parsedPath.dir, parsedPath.name));
     }
   });
-  console.log(functionPrefixes);
   return functionPrefixes;
 };
 
 const main = async ({ project }: { project: string | undefined }) => {
+  console.info("Checking project for Convex dependency...");
+
   if (project === undefined) {
     throw Error("No project specified");
   }
   ensureConvexProject(project);
 
+  console.info("Determining Convex functions directory...");
   const functionsDirName = getFunctionsDirName(project);
   const functionsDir = path.join(project, functionsDirName);
 
+  console.info(`Found directory ${functionsDirName}`);
+
   const functionPrefixes = await getFunctionPrefixes(functionsDir);
 
+  console.info("Searching for React files...");
   const reactFiles = getReactFiles(project, functionsDir);
-  console.log(reactFiles);
+  console.info(`# files: ${reactFiles.length}`);
+  console.debug(reactFiles);
 
+  console.info("Transforming React files...");
   const transformPath = path.resolve("transform.ts");
   await runJSCodeshift(transformPath, reactFiles, {
     kind: "react",
     functionPrefixes,
   });
 
+  console.info("Searching for Convex function files...");
   const convexFiles = getConvexFiles(project, functionsDir);
-  console.log(convexFiles);
+  console.info(`# files: ${convexFiles.length}`);
+  console.debug(convexFiles);
+  console.info("Transforming Convex function files...");
   await runJSCodeshift(transformPath, convexFiles, {
     kind: "convex",
     functionPrefixes,
   });
 
+  console.info("Searching for other files containing function names...");
   const otherFiles = getAllFiles(
     project,
     functionsDir,
     functionPrefixes
   ).filter((f) => !reactFiles.includes(f) && !convexFiles.includes(f));
-  console.log(otherFiles);
+  console.info(`# files: ${otherFiles.length}`);
+  console.debug(otherFiles);
+
+  console.info("Transforming remaining files...");
   await runJSCodeshift(transformPath, otherFiles, {
     functionPrefixes,
   });
