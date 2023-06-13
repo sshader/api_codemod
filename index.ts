@@ -194,7 +194,7 @@ const main = async ({ project }: { project: string | undefined }) => {
   console.debug(convexFiles);
   console.info("Transforming Convex function files...");
   await runJSCodeshift(transformPath, convexFiles, {
-    kind: "convex",
+    kind: "server",
     functionPrefixes,
   });
 
