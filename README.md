@@ -6,6 +6,8 @@ To run:
 Make sure you're in a clean git state.
 
 ```
+git clone https://github.com/sshader/api_codemod.git
+cd api_codemod
 npm install
 npx ts-node index.ts --project <path to project>
 ```
