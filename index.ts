@@ -127,12 +127,12 @@ const getAllFiles = (
   );
 
   // search for `'listMessages|'sendMessage`
-  const singleQuoteRegex = functionPrefixes.map((f) => `"${f}`).join("|");
+  const singleQuoteRegex = functionPrefixes.map((f) => `'${f}`).join("|");
 
   const singleQuoteFiles = gitGrep(
     project,
     functionsDir,
-    `'${singleQuoteRegex}'`
+    `"${singleQuoteRegex}"`
   );
   return [...new Set([...singleQuoteFiles, ...doubleQuoteFiles])];
 };
